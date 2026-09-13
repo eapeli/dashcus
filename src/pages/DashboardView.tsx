@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase';
 import type { Ticket, TicketStatus } from '@/lib/types';
 import { STATUS_LABELS, STATUS_COLORS, PRIORITY_LABELS, PRIORITY_COLORS, PRIORITY_DOT, CATEGORY_LABELS } from '@/lib/types';
 import type { Department } from '@/lib/types';
+import KanbanBoard from '@/components/KanbanBoard';
 import {
   Clock,
   AlertCircle,
@@ -191,6 +192,9 @@ export default function DashboardView({ onNavigate, onSelectTicket }: DashboardV
           )}
         </div>
       </div>
+
+      {/* Kanban board */}
+      <KanbanBoard tickets={tickets} onSelectTicket={onSelectTicket} />
 
       {/* Department breakdown */}
       <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">

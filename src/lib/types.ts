@@ -48,6 +48,19 @@ export interface Ticket {
   close_reason: string | null;
   close_notes: string | null;
   transcript_url: string | null;
+  feedback_success: boolean | null;
+  feedback_text: string | null;
+  board_category_id: string | null;
+  created_at: string;
+}
+
+export interface KanbanCategory {
+  id: string;
+  name: string;
+  description: string;
+  color: string;
+  position: number;
+  created_by: string | null;
   created_at: string;
 }
 

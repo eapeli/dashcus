@@ -40,6 +40,8 @@ export default function TicketDetailModal({ ticket, onClose, onUpdate }: TicketD
   const [transferReason, setTransferReason] = useState('');
   const [closeReason, setCloseReason] = useState('');
   const [closeNotes, setCloseNotes] = useState('');
+  const [feedbackSuccess, setFeedbackSuccess] = useState<'resolved' | 'unresolved' | ''>('');
+  const [feedbackText, setFeedbackText] = useState('');
   const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -153,6 +155,9 @@ export default function TicketDetailModal({ ticket, onClose, onUpdate }: TicketD
       transfer_reason: transferReason || 'Transferido sem justificativa',
       transferred_to: transferAgent || null,
     };
+    if (transferAgent) {
+      update.assigned_to = transferAgent;
+    }
     if (transferDept !== ticket.department_id) {
       update.department_id = transferDept;
     }
@@ -190,6 +195,10 @@ export default function TicketDetailModal({ ticket, onClose, onUpdate }: TicketD
 
   const handleClose = async () => {
     if (!profile) return;
+    if (!feedbackSuccess) {
+      setError('Informe se o caso foi resolvido ou não');
+      return;
+    }
     setAction('close');
     setError(null);
     const transcriptText = messages.map(m =>
@@ -201,8 +210,10 @@ export default function TicketDetailModal({ ticket, onClose, onUpdate }: TicketD
     const { error } = await supabase.from('tickets').update({
       status: 'closed',
       closed_at: new Date().toISOString(),
-      close_reason: closeReason || 'Resolvido',
+      close_reason: closeReason || (feedbackSuccess === 'resolved' ? 'Resolvido' : 'Não resolvido'),
       close_notes: closeNotes,
+      feedback_success: feedbackSuccess === 'resolved',
+      feedback_text: feedbackText.trim() || null,
       transcript_url: transcriptUrl,
     }).eq('id', ticket.id);
 
@@ -220,12 +231,14 @@ export default function TicketDetailModal({ ticket, onClose, onUpdate }: TicketD
         ticket_id: ticket.id,
         sender_type: 'system',
         sender_name: 'Sistema',
-        content: `Ticket fechado por ${profile.full_name}. Motivo: ${closeReason || 'Resolvido'}. Transcript gerado e enviado ao canal do Discord.`,
+        content: `Ticket fechado por ${profile.full_name}. Feedback: ${feedbackSuccess === 'resolved' ? 'Caso resolvido com sucesso' : 'Caso não resolvido'}.${feedbackText.trim() ? ` Observação: ${feedbackText.trim()}` : ''} Transcript gerado e enviado ao canal do Discord.`,
         attachment_type: 'none',
       });
       setAction('none');
       setCloseReason('');
       setCloseNotes('');
+      setFeedbackSuccess('');
+      setFeedbackText('');
       onUpdate();
       onClose();
     }
@@ -489,7 +502,9 @@ export default function TicketDetailModal({ ticket, onClose, onUpdate }: TicketD
                         >
                           <option value="">Atendente (opcional)...</option>
                           {agents.filter(a => a.id !== profile?.id).map((a) => (
-                            <option key={a.id} value={a.id}>{a.full_name}</option>
+                            <option key={a.id} value={a.id}>
+                              {a.full_name}{a.discord_username ? ` @${a.discord_username}` : ''}
+                            </option>
                           ))}
                         </select>
                         <textarea
@@ -521,18 +536,54 @@ export default function TicketDetailModal({ ticket, onClose, onUpdate }: TicketD
                     </button>
 
                     {action === 'close' && (
-                      <div className="p-3 bg-emerald-50 rounded-xl space-y-2">
+                      <div className="p-3 bg-emerald-50 rounded-xl space-y-3">
+                        <div>
+                          <p className="text-xs font-semibold text-emerald-700 mb-2">O caso foi resolvido com sucesso?</p>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setFeedbackSuccess('resolved')}
+                              className={`flex-1 px-3 py-2.5 rounded-lg text-sm font-medium border-2 transition-all ${
+                                feedbackSuccess === 'resolved'
+                                  ? 'bg-emerald-600 text-white border-emerald-600'
+                                  : 'bg-white text-emerald-700 border-emerald-200 hover:border-emerald-400'
+                              }`}
+                            >
+                              <CheckCircle2 className="w-4 h-4 inline mr-1.5" />
+                              Sim, resolvido
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setFeedbackSuccess('unresolved')}
+                              className={`flex-1 px-3 py-2.5 rounded-lg text-sm font-medium border-2 transition-all ${
+                                feedbackSuccess === 'unresolved'
+                                  ? 'bg-red-500 text-white border-red-500'
+                                  : 'bg-white text-red-600 border-red-200 hover:border-red-400'
+                              }`}
+                            >
+                              <X className="w-4 h-4 inline mr-1.5" />
+                              Não, sem solução
+                            </button>
+                          </div>
+                        </div>
+                        <textarea
+                          value={feedbackText}
+                          onChange={(e) => setFeedbackText(e.target.value)}
+                          placeholder="Breve feedback do atendimento (opcional)..."
+                          rows={2}
+                          className="w-full px-3 py-2 bg-white border border-emerald-200 rounded-lg text-sm text-gray-700 focus:outline-none focus:border-emerald-400 resize-none"
+                        />
                         <input
                           value={closeReason}
                           onChange={(e) => setCloseReason(e.target.value)}
-                          placeholder="Motivo do fechamento"
+                          placeholder="Motivo do fechamento (opcional)"
                           className="w-full px-3 py-2 bg-white border border-emerald-200 rounded-lg text-sm text-gray-700 focus:outline-none focus:border-emerald-400"
                         />
                         <textarea
                           value={closeNotes}
                           onChange={(e) => setCloseNotes(e.target.value)}
-                          placeholder="Notas de fechamento..."
-                          rows={3}
+                          placeholder="Notas internas de fechamento..."
+                          rows={2}
                           className="w-full px-3 py-2 bg-white border border-emerald-200 rounded-lg text-sm text-gray-700 focus:outline-none focus:border-emerald-400 resize-none"
                         />
                         <p className="text-xs text-emerald-600">
@@ -540,7 +591,8 @@ export default function TicketDetailModal({ ticket, onClose, onUpdate }: TicketD
                         </p>
                         <button
                           onClick={handleClose}
-                          className="w-full px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-500 transition-colors"
+                          disabled={action === 'close' && !feedbackSuccess}
+                          className="w-full px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-500 transition-colors disabled:opacity-50"
                         >
                           Confirmar Fechamento
                         </button>
