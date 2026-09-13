@@ -27,9 +27,9 @@ export default function Login() {
 
       <div className="relative w-full max-w-md">
         <div className="text-center mb-8">
-          <img src="/logo-cus-nova-sem-fundo.png" alt="CUS Atendimento" className="w-20 h-20 mx-auto mb-4 object-contain" />
-          <h1 className="text-2xl font-bold text-white">CUS Atendimento</h1>
-          <p className="text-slate-400 mt-1 text-sm">Central de Atendimento Discord</p>
+          <img src="/logo-cus-nova-sem-fundo.png" alt="CUS Atendimento" className="w-32 h-32 mx-auto mb-3 object-contain drop-shadow-2xl" />
+          <h1 className="text-3xl font-bold text-white tracking-tight">CUS Atendimento</h1>
+          <p className="text-slate-400 mt-1.5 text-sm">Central de Atendimento Discord</p>
         </div>
 
         <div className="bg-slate-800/60 backdrop-blur-xl rounded-2xl border border-slate-700/50 shadow-2xl p-8">

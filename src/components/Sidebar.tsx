@@ -1,6 +1,5 @@
 import { useAuth } from '@/lib/auth';
 import {
-  Headphones,
   LayoutDashboard,
   Ticket,
   BarChart3,
@@ -39,12 +38,10 @@ export default function Sidebar({ currentView, onNavigate, waitingCount, inProgr
     <aside className="w-64 bg-slate-900 border-r border-slate-800 flex flex-col flex-shrink-0">
       <div className="px-5 py-5 border-b border-slate-800">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg shadow-blue-500/20">
-            <Headphones className="w-5 h-5 text-white" />
-          </div>
+          <img src="/logo-cus-nova-sem-fundo.png" alt="CUS" className="w-11 h-11 object-contain" />
           <div>
-            <h1 className="text-white font-bold text-lg leading-none">SupportHub</h1>
-            <p className="text-slate-500 text-xs mt-1">Atendimento Discord</p>
+            <h1 className="text-white font-bold text-base leading-none">CUS Atendimento</h1>
+            <p className="text-slate-500 text-xs mt-1">Central Discord</p>
           </div>
         </div>
       </div>
