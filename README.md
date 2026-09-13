@@ -12,8 +12,8 @@ Todo este ecossistema é liderado dentro da cidade por:
 
 O projeto utiliza dois servidores Discord:
 
-- **Servidor HP:** `1483260289632829493`, onde os tickets são abertos e atendidos.
-- **Servidor de gestão/heads:** `1497845087575740456`, onde ficam transcripts e comunicações administrativas.
+- **Servidor HP:** servidor privado onde os tickets são abertos e atendidos.
+- **Servidor de gestão/heads:** servidor privado onde ficam transcripts e comunicações administrativas.
 
 ## 👩‍💻 A Mente Por Trás do Projeto
 
@@ -174,10 +174,10 @@ Para o bot, crie `bot/.env` usando [bot/.env.example](bot/.env.example):
 ```env
 DISCORD_BOT_TOKEN=SEU_TOKEN_DO_BOT
 DISCORD_CLIENT_ID=ID_DA_APLICACAO
-DISCORD_HP_GUILD_ID=1483260289632829493
-DISCORD_MANAGEMENT_GUILD_ID=1497845087575740456
+DISCORD_HP_GUILD_ID=ID_DO_SERVIDOR_HP
+DISCORD_MANAGEMENT_GUILD_ID=ID_DO_SERVIDOR_GESTAO
 DISCORD_CHANNEL_TICKET_PANEL_ID=ID_DO_CANAL_ABRIR_TICKET
-DISCORD_CHANNEL_TRANSCRIPTS_ID=1502647502992838737
+DISCORD_CHANNEL_TRANSCRIPTS_ID=ID_DO_CANAL_TRANSCRIPTS
 DISCORD_CHANNEL_ATENDIMENTO_GERAL_ID=ID_DO_CANAL
 DISCORD_CHANNEL_SUPORTE_TECNICO_ID=ID_DO_CANAL
 DISCORD_CHANNEL_FINANCEIRO_ID=ID_DO_CANAL
