@@ -406,13 +406,12 @@ Este projeto está licenciado sob a **MIT License**.
 - **Contato do projeto:** Elisabete Alves.
 
 ## 🎉 Agradecimentos
+[](https://github.com/eapeli/dashcus#-agradecimentos)
 
-Projeto desenvolvido com dedicação para a comunidade do Hospital CUS Capital. Tecnologia aplicada ao atendimento, à comunicação e à experiência de saúde em roleplay.
+Projeto desenvolvido com dedicação para a comunidade do Hospital CUS Capital. Tecnologia a serviço da saúde e do atendimento em roleplay.
 
 ---
 
-**🏥 CUS ATENDIMENTO — o sistema integrado de tickets, equipe e comunicação do Hospital CUS Capital.**
+**🏥 CUS ATENDIMENTO - o sistema de tickets e atendimento integrado do Hospital CUS da Capital City** **Desenvolvido por Elisabete Alves - Estudante de Psicologia, Desenvolvedora, Streamer, Designer, Compositora e Cantora**
 
-**Desenvolvido por Elisabete Alves — Estudante de Psicologia, Desenvolvedora, Streamer, Designer, Compositora e Cantora.**
-
-🚀 Sistema profissional, seguro e eficiente — uma experiência de atendimento organizada, humana e conectada. 🧠 Com a visão multidisciplinar da Diretora Geral do HP CUS Capital! 👩‍💻 Desenvolvido com paixão e dedicação por uma profissional multi-talentosa!
+🚀 Sistema profissional, seguro e eficiente - A melhor experiência em atendimento! 🧠 Com a visão multidisciplinar da Diretora Geral do HP CUS Capital! 👩‍💻 Desenvolvido com paixão e dedicação por uma profissional multi-talentosa!
