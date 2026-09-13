@@ -406,7 +406,6 @@ Este projeto está licenciado sob a **MIT License**.
 - **Contato do projeto:** Elisabete Alves.
 
 ## 🎉 Agradecimentos
-[](https://github.com/eapeli/dashcus#-agradecimentos)
 
 Projeto desenvolvido com dedicação para a comunidade do Hospital CUS Capital. Tecnologia a serviço da saúde e do atendimento em roleplay.
 
