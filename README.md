@@ -407,12 +407,12 @@ Este projeto está licenciado sob a **MIT License**.
 
 ## 🎉 Agradecimentos
 
-Projeto desenvolvido com dedicação para a comunidade do Hospital CUS Capital. Tecnologia aplicada ao atendimento e à experiência de saúde em roleplay.
+Projeto desenvolvido com dedicação para a comunidade do Hospital CUS Capital. Tecnologia aplicada ao atendimento, à comunicação e à experiência de saúde em roleplay.
 
 ---
 
-**🏥 CUS Atendimento — sistema integrado de tickets, equipe e comunicação do Hospital CUS Capital.**
+**🏥 CUS ATENDIMENTO — o sistema integrado de tickets, equipe e comunicação do Hospital CUS Capital.**
 
-Desenvolvido por **Elisabete Alves**, estudante de Psicologia, desenvolvedora, streamer, designer, compositora e cantora.
+**Desenvolvido por Elisabete Alves — Estudante de Psicologia, Desenvolvedora, Streamer, Designer, Compositora e Cantora.**
 
-🚀 Sistema profissional, seguro e eficiente para transformar o atendimento do HP CUS em uma experiência organizada, humana e conectada.
+🚀 Sistema profissional, seguro e eficiente — uma experiência de atendimento organizada, humana e conectada. 🧠 Com a visão multidisciplinar da Diretora Geral do HP CUS Capital! 👩‍💻 Desenvolvido com paixão e dedicação por uma profissional multi-talentosa!
