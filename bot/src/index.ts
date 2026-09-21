@@ -15,8 +15,6 @@ import {
   REST,
   Routes,
   SlashCommandBuilder,
-  StringSelectMenuBuilder,
-  StringSelectMenuInteraction,
   TextChannel,
   TextInputBuilder,
   TextInputStyle,
@@ -39,9 +37,9 @@ const upload = multer({
 });
 
 const categories = {
-  duvida: { label: 'Dúvidas', color: 0x12b981 },
-  reclamacao: { label: 'Reclamação', color: 0x5865f2 },
-  funcionario: { label: 'Reportar Funcionário', color: 0xef4444 },
+  duvida: { label: 'Dúvidas', emoji: '❓', color: 0x2d7fff, description: 'Informações gerais, orientações e perguntas sobre os serviços.' },
+  reclamacao: { label: 'Reclamação', emoji: '⚠️', color: 0xf59e0b, description: 'Insatisfações, problemas no atendimento ou na estrutura.' },
+  funcionario: { label: 'Reportar Funcionário', emoji: '🔴', color: 0xef4444, description: 'Relatos sobre condutas inadequadas ou incidentes.' },
 } as const;
 
 type TicketCategory = keyof typeof categories;
@@ -72,6 +70,10 @@ const departmentNames: Record<string, string> = {
   recursos_humanos: 'Recursos Humanos',
 };
 
+const BRAND_COLOR = 0x08a6c9;
+const BRAND_NAME = 'CUS';
+const BRAND_TAGLINE = 'Vidas alheias, riquezas a salvar';
+
 const ticketCommand = new SlashCommandBuilder()
   .setName('ticket')
   .setDescription('Abre um atendimento com a equipe')
@@ -82,10 +84,6 @@ const ticketCommand = new SlashCommandBuilder()
     { name: 'Financeiro', value: 'financeiro' },
     { name: 'Recursos Humanos', value: 'recursos_humanos' },
   ));
-
-const manageCommand = new SlashCommandBuilder()
-  .setName('gerenciar')
-  .setDescription('Mostra o painel de gestão do atendimento deste canal (apenas staff)');
 
 const panelChannelId = process.env.DISCORD_CHANNEL_TICKET_PANEL_ID || '';
 
@@ -101,34 +99,26 @@ function priorityLabel(priority: string): string {
   return ({ low: 'Baixa', normal: 'Normal', high: 'Alta', urgent: 'Urgente' } as Record<string, string>)[priority] || 'Normal';
 }
 
-function priorityColor(priority: string): number {
-  return ({ low: 0x64748b, normal: 0x3b82f6, high: 0xf59e0b, urgent: 0xef4444 } as Record<string, number>)[priority] || 0x3b82f6;
+function priorityEmoji(priority: string): string {
+  return ({ low: '🟢', normal: '🔵', high: '🟡', urgent: '🔴' } as Record<string, string>)[priority] || '🔵';
+}
+
+function statusLabel(status: string): string {
+  return ({ waiting: 'Aguardando', in_progress: 'Em Atendimento', transferred: 'Transferido', closed: 'Encerrado' } as Record<string, string>)[status] || 'Aguardando';
+}
+
+function statusEmoji(status: string): string {
+  return ({ waiting: '⏳', in_progress: '🎧', transferred: '↔️', closed: '🔒' } as Record<string, string>)[status] || '⏳';
 }
 
 function cleanChannelName(subject: string): string {
   return subject.replace(/[^a-zA-Z0-9\- ]/g, '').trim().slice(0, 45).replace(/\s+/g, '-') || 'atendimento';
 }
 
-function ticketControls(ticketId: string, status: string): ActionRowBuilder<ButtonBuilder>[] {
-  if (status === 'closed') {
-    return [new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(`ticket_reopen:${ticketId}`).setLabel('Reabrir atendimento').setStyle(ButtonStyle.Success),
-    )];
-  }
-  return [
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(`ticket_claim:${ticketId}`).setLabel('Assumir').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId(`ticket_transfer:${ticketId}`).setLabel('Transferir').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(`ticket_priority:${ticketId}`).setLabel('Prioridade').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId(`ticket_close:${ticketId}`).setLabel('Encerrar').setStyle(ButtonStyle.Danger),
-    ),
-  ];
-}
-
 async function registerCommands() {
   const rest = new REST({ version: '10' }).setToken(config.discordToken);
   await rest.put(Routes.applicationGuildCommands(config.discordClientId, config.hpGuildId), {
-    body: [ticketCommand.toJSON(), manageCommand.toJSON()],
+    body: [ticketCommand.toJSON()],
   });
 }
 
@@ -142,14 +132,8 @@ async function getProfileByDiscordId(discordId: string): Promise<ProfileRow | nu
   return data as ProfileRow | null;
 }
 
-async function getProfileByDiscordReference(reference: string): Promise<ProfileRow | null> {
-  const normalized = reference.replace(/[<@!>]/g, '').trim();
-  if (/^\d{15,25}$/.test(normalized)) return getProfileByDiscordId(normalized);
-  const { data } = await supabase
-    .from('profiles')
-    .select('id,full_name,discord_id,discord_username,role')
-    .ilike('discord_username', normalized)
-    .maybeSingle();
+async function getProfileById(profileId: string): Promise<ProfileRow | null> {
+  const { data } = await supabase.from('profiles').select('id,full_name,discord_id,discord_username,role').eq('id', profileId).maybeSingle();
   return data as ProfileRow | null;
 }
 
@@ -163,22 +147,66 @@ async function addSystemMessage(ticketId: string, content: string) {
   });
 }
 
-async function postTicketEmbed(ticket: TicketRow, content?: string) {
-  if (!ticket.discord_channel_id) return;
-  const channel = await client.channels.fetch(ticket.discord_channel_id);
-  if (!isTextChannel(channel)) return;
-  const embed = new EmbedBuilder()
-    .setColor(priorityColor(ticket.priority))
-    .setTitle(`Atendimento #${ticket.ticket_number}`)
-    .setDescription(ticket.subject)
+function buildWelcomeEmbed(ticket: TicketRow, subject: string, category: TicketCategory, department: string): EmbedBuilder {
+  return new EmbedBuilder()
+    .setColor(categories[category].color)
+    .setAuthor({ name: `${BRAND_NAME} • Central de Atendimento`, iconURL: client.user?.displayAvatarURL() || undefined })
+    .setTitle(`${categories[category].emoji}  Atendimento #${ticket.ticket_number}`)
+    .setDescription(`Olá <@${ticket.customer_discord_id}>! Seu atendimento foi aberto com sucesso.\n\nUm membro da equipe irá assumir seu caso em breve. Enquanto aguarda, **descreva todos os detalhes** do seu problema aqui neste canal para que possamos te ajudar com agilidade.`)
     .addFields(
-      { name: 'Prioridade', value: priorityLabel(ticket.priority), inline: true },
-      { name: 'Status', value: ticket.status === 'transferred' ? 'Transferido' : ticket.status === 'in_progress' ? 'Em atendimento' : 'Aguardando', inline: true },
-      { name: 'Cliente', value: ticket.customer_discord_id ? `<@${ticket.customer_discord_id}>` : ticket.customer_name, inline: true },
+      { name: '📝 Assunto', value: `\`\`\`${subject.trim()}\`\`\``, inline: false },
+      { name: '📂 Categoria', value: `${categories[category].emoji} ${categories[category].label}`, inline: true },
+      { name: '🏢 Departamento', value: departmentNames[department], inline: true },
+      { name: '⏳ Status', value: 'Aguardando atendimento', inline: true },
     )
-    .setFooter({ text: 'CUS • Central de Atendimento' })
+    .addFields(
+      { name: '\u200B', value: '\u200B', inline: false },
+      { name: '📋 Orientações', value: '• Mantenha o respeito no canal\n• Envie prints ou anexos se necessário\n• Não mencione @here ou @everyone\n• O atendimento é privado e visível apenas a você e a equipe', inline: false },
+    )
+    .setFooter({ text: `${BRAND_NAME} • ${BRAND_TAGLINE}`, iconURL: client.user?.displayAvatarURL() || undefined })
     .setTimestamp();
-  await channel.send({ content, embeds: [embed] });
+}
+
+function buildStatusEmbed(ticket: TicketRow, agentName?: string): EmbedBuilder {
+  const status = ticket.status;
+  const colorMap: Record<string, number> = { waiting: 0xf59e0b, in_progress: 0x2d7fff, transferred: 0xa855f7, closed: 0x64748b };
+  const embed = new EmbedBuilder()
+    .setColor(colorMap[status] || BRAND_COLOR)
+    .setAuthor({ name: `${BRAND_NAME} • Central de Atendimento`, iconURL: client.user?.displayAvatarURL() || undefined })
+    .setTitle(`${statusEmoji(status)}  Atendimento #${ticket.ticket_number}`)
+    .addFields(
+      { name: 'Status', value: statusLabel(status), inline: true },
+      { name: 'Prioridade', value: `${priorityEmoji(ticket.priority)} ${priorityLabel(ticket.priority)}`, inline: true },
+      { name: 'Cliente', value: ticket.customer_discord_id ? `<@${ticket.customer_discord_id}>` : ticket.customer_name, inline: true },
+    );
+
+  if (status === 'in_progress' && agentName) {
+    embed.setDescription(`🎧 **${agentName}** assumiu o seu atendimento e já está trabalhando no seu caso.\n\nA partir de agora, todas as mensagens da equipe aparecerão aqui automaticamente.`);
+  } else if (status === 'transferred' && agentName) {
+    embed.setDescription(`↔️ Seu atendimento foi **transferido** para **${agentName}**.\n\nO novo responsável irá dar continuidade ao seu caso.`);
+  } else if (status === 'closed') {
+    embed.setDescription(`🔒 Seu atendimento foi **encerrado**.\n\nAgradecemos o seu contato! Se precisar de ajuda novamente, abra um novo atendimento pelo painel.`);
+  } else if (status === 'waiting') {
+    embed.setDescription(`⏳ Seu atendimento voltou para a fila de espera.\n\nUm membro da equipe irá assumir em breve.`);
+  }
+
+  return embed
+    .setFooter({ text: `${BRAND_NAME} • ${BRAND_TAGLINE}`, iconURL: client.user?.displayAvatarURL() || undefined })
+    .setTimestamp();
+}
+
+function buildCloseEmbed(ticket: TicketRow, resolved: boolean, feedback: string): EmbedBuilder {
+  return new EmbedBuilder()
+    .setColor(resolved ? 0x10b981 : 0xef4444)
+    .setAuthor({ name: `${BRAND_NAME} • Central de Atendimento`, iconURL: client.user?.displayAvatarURL() || undefined })
+    .setTitle(`🔒  Atendimento #${ticket.ticket_number} Encerrado`)
+    .setDescription(`Este atendimento foi encerrado pela equipe.\n\n**Resultado:** ${resolved ? '✅ Resolvido' : '❌ Não resolvido'}${feedback ? `\n\n**Feedback da equipe:**\n\`\`\`${feedback}\`\`\`` : ''}`)
+    .addFields(
+      { name: 'Cliente', value: ticket.customer_discord_id ? `<@${ticket.customer_discord_id}>` : ticket.customer_name, inline: true },
+      { name: 'Assunto', value: ticket.subject, inline: false },
+    )
+    .setFooter({ text: `${BRAND_NAME} • ${BRAND_TAGLINE}`, iconURL: client.user?.displayAvatarURL() || undefined })
+    .setTimestamp();
 }
 
 async function createTicketForUser(
@@ -225,23 +253,11 @@ async function createTicketForUser(
     reason: `Atendimento #${ticket.ticket_number}`,
   });
 
-  const introEmbed = new EmbedBuilder()
-    .setColor(categories[category].color)
-    .setTitle(`Atendimento #${ticket.ticket_number}`)
-    .setDescription('Seu atendimento foi criado. Explique todos os detalhes neste canal para que a equipe possa ajudar com agilidade.')
-    .addFields(
-      { name: 'Assunto', value: subject.trim(), inline: false },
-      { name: 'Categoria', value: categories[category].label, inline: true },
-      { name: 'Departamento', value: departmentNames[department], inline: true },
-      { name: 'Próximo passo', value: 'Um atendente assumirá o caso em breve.', inline: false },
-      { name: 'Staff', value: 'Use `/gerenciar` para abrir o painel de gestão deste atendimento.', inline: false },
-    )
-    .setFooter({ text: 'CUS • Central de Atendimento' })
-    .setTimestamp();
+  const welcomeEmbed = buildWelcomeEmbed(ticket, subject, category, department);
 
   await ticketChannel.send({
     content: `<@${interaction.user.id}>`,
-    embeds: [introEmbed],
+    embeds: [welcomeEmbed],
   });
 
   await supabase.from('tickets').update({ discord_channel_id: ticketChannel.id }).eq('id', ticket.id);
@@ -281,37 +297,39 @@ async function publishTicketPanel() {
   const channel = await client.channels.fetch(panelChannelId);
   if (!isTextChannel(channel) || channel.guild.id !== config.hpGuildId) throw new Error('Canal do painel não pertence ao servidor configurado');
   const recentMessages = await channel.messages.fetch({ limit: 50 });
-  const panelExists = recentMessages.some((message) => message.author.id === client.user?.id && message.embeds.some((embed) => embed.title === 'CUS | Central de Atendimento'));
+  const panelExists = recentMessages.some((message) => message.author.id === client.user?.id && message.embeds.some((embed) => embed.title === `${BRAND_NAME} | Central de Atendimento`));
   if (panelExists) return;
 
   const panel = new EmbedBuilder()
-    .setColor(0x08a6c9)
-    .setTitle('CUS | Central de Atendimento')
-    .setDescription('Precisa de ajuda? Escolha uma categoria abaixo para abrir um atendimento privado com a equipe.\n\n**Antes de abrir**\nExplique o problema com clareza e envie todos os detalhes necessários. Isso ajuda a equipe a responder mais rápido.')
+    .setColor(BRAND_COLOR)
+    .setAuthor({ name: `${BRAND_NAME} • Central de Atendimento`, iconURL: client.user?.displayAvatarURL() || undefined })
+    .setTitle(`${BRAND_NAME} | Central de Atendimento`)
+    .setDescription('Precisa de ajuda? Selecione uma das categorias abaixo para abrir um atendimento privado com a nossa equipe.\n\n> **Antes de abrir um ticket**\n> Explique o problema com clareza e envie todos os detalhes necessários. Isso ajuda a equipe a responder mais rápido.')
     .addFields(
-      { name: 'Dúvidas', value: 'Informações gerais, orientações e perguntas sobre os serviços.', inline: false },
-      { name: 'Reclamação', value: 'Insatisfações, problemas no atendimento ou na estrutura.', inline: false },
-      { name: 'Reportar Funcionário', value: 'Relatos sobre condutas inadequadas ou incidentes.', inline: false },
+      { name: `${categories.duvida.emoji} Dúvidas`, value: categories.duvida.description, inline: false },
+      { name: `${categories.reclamacao.emoji} Reclamação`, value: categories.reclamacao.description, inline: false },
+      { name: `${categories.funcionario.emoji} Reportar Funcionário`, value: categories.funcionario.description, inline: false },
     )
-    .setFooter({ text: 'CUS • Vidas alheias, riquezas a salvar' });
+    .setFooter({ text: `${BRAND_NAME} • ${BRAND_TAGLINE}`, iconURL: client.user?.displayAvatarURL() || undefined })
+    .setTimestamp();
 
   await channel.send({
     embeds: [panel],
     components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('ticket_category:duvida').setLabel('Dúvidas').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('ticket_category:reclamacao').setLabel('Reclamação').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('ticket_category:funcionario').setLabel('Reportar Funcionário').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('ticket_category:duvida').setLabel('Dúvidas').setEmoji(categories.duvida.emoji).setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('ticket_category:reclamacao').setLabel('Reclamação').setEmoji(categories.reclamacao.emoji).setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('ticket_category:funcionario').setLabel('Reportar Funcionário').setEmoji(categories.funcionario.emoji).setStyle(ButtonStyle.Danger),
     )],
   });
 }
 
 async function showTicketSubjectModal(interaction: ButtonInteraction) {
   const category = categoryValue(interaction.customId.replace('ticket_category:', ''));
-  const modal = new ModalBuilder().setCustomId(`ticket_subject:${category}`).setTitle(categories[category].label);
+  const modal = new ModalBuilder().setCustomId(`ticket_subject:${category}`).setTitle(`${categories[category].emoji} ${categories[category].label}`);
   const subject = new TextInputBuilder()
     .setCustomId('subject')
-    .setLabel('Sobre o que você precisa de ajuda?')
-    .setPlaceholder('Descreva o assunto do atendimento')
+    .setLabel('Descreva o assunto do atendimento')
+    .setPlaceholder('Ex.: Preciso de ajuda com um pagamento realizado...')
     .setStyle(TextInputStyle.Paragraph)
     .setRequired(true)
     .setMinLength(5)
@@ -369,216 +387,35 @@ async function syncDashboardMessage(payload: { new: Record<string, unknown> }) {
   }
 }
 
-async function assertStaff(interaction: ButtonInteraction | StringSelectMenuInteraction): Promise<ProfileRow | null> {
-  const profile = await getProfileByDiscordId(interaction.user.id);
-  if (!profile) {
-    await interaction.reply({ content: 'Apenas a staff pode usar este botão.', ephemeral: true });
-    return null;
-  }
-  return profile;
-}
+async function syncTicketUpdate(payload: { new: Record<string, unknown>; old: Record<string, unknown> }) {
+  const newRecord = payload.new;
+  const oldRecord = payload.old;
+  const ticketId = String(newRecord.id);
+  const oldStatus = String(oldRecord.status || '');
+  const newStatus = String(newRecord.status || '');
+  if (oldStatus === newStatus) return;
 
-async function claimTicket(interaction: ButtonInteraction, ticketId: string) {
-  const profile = await assertStaff(interaction);
   const ticket = await getTicket(ticketId);
-  if (!profile || !ticket) {
-    if (ticket) await interaction.reply({ content: 'Apenas a staff pode usar este botão.', ephemeral: true });
-    return;
-  }
-  if (ticket.status === 'closed') {
-    await interaction.reply({ content: 'Este atendimento já está encerrado.', ephemeral: true });
-    return;
-  }
-  if (ticket.assigned_to && ticket.assigned_to !== profile.id) {
-    await interaction.reply({ content: 'Este atendimento já está sendo conduzido por outro atendente.', ephemeral: true });
-    return;
-  }
-  await supabase.from('tickets').update({ status: 'in_progress', assigned_to: profile.id, picked_up_at: new Date().toISOString() }).eq('id', ticketId);
-  await supabase.from('ticket_events').insert({ ticket_id: ticketId, event_type: 'picked_up', actor_id: profile.id, actor_name: profile.full_name, details: { source: 'discord' } });
-  await addSystemMessage(ticketId, `${profile.full_name} assumiu este atendimento.`);
+  if (!ticket?.discord_channel_id) return;
 
-  const updatedTicket = { ...ticket, status: 'in_progress' as const, assigned_to: profile.id };
-  await interaction.reply({ content: 'Atendimento assumido. Você já pode responder pela dashboard ou por este canal.', ephemeral: true });
-  await postTicketEmbed(updatedTicket, `Atendimento assumido por **${profile.full_name}**.`);
-}
-
-async function showTransferModal(interaction: ButtonInteraction, ticketId: string) {
-  const profile = await assertStaff(interaction);
-  if (!profile) return;
-  const modal = new ModalBuilder().setCustomId(`ticket_transfer_submit:${ticketId}`).setTitle('Transferir atendimento');
-  const target = new TextInputBuilder().setCustomId('target').setLabel('ID ou username do atendente').setPlaceholder('Ex.: 123456789012345678 ou usuario').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(100);
-  const reason = new TextInputBuilder().setCustomId('reason').setLabel('Motivo da transferência').setPlaceholder('Explique brevemente o motivo').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(500);
-  modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(target), new ActionRowBuilder<TextInputBuilder>().addComponents(reason));
-  await interaction.showModal(modal);
-}
-
-async function transferTicket(interaction: ModalSubmitInteraction, ticketId: string) {
-  const actor = await getProfileByDiscordId(interaction.user.id);
-  const targetReference = interaction.fields.getTextInputValue('target');
-  const reason = interaction.fields.getTextInputValue('reason');
-  const target = await getProfileByDiscordReference(targetReference);
-  if (!actor || !target || !target.discord_id) {
-    await interaction.reply({ content: 'Não encontrei um atendente cadastrado com esse ID ou username do Discord.', ephemeral: true });
-    return;
-  }
-  const ticket = await getTicket(ticketId);
-  if (!ticket || ticket.status === 'closed') {
-    await interaction.reply({ content: 'Este atendimento não está disponível para transferência.', ephemeral: true });
-    return;
-  }
-  await supabase.from('tickets').update({ status: 'transferred', assigned_to: target.id, transferred_to: target.id, transfer_reason: reason }).eq('id', ticketId);
-  await supabase.from('ticket_events').insert({ ticket_id: ticketId, event_type: 'transferred', actor_id: actor.id, actor_name: actor.full_name, details: { target: target.full_name, target_discord_id: target.discord_id, reason, source: 'discord' } });
-  await addSystemMessage(ticketId, `Atendimento transferido de ${actor.full_name} para ${target.full_name}. Motivo: ${reason}`);
-  await interaction.reply({ content: `Atendimento transferido para ${target.full_name}.`, ephemeral: true });
-  const updatedTicket = { ...ticket, status: 'transferred' as const, assigned_to: target.id };
-  await postTicketEmbed(updatedTicket, `Atendimento transferido para <@${target.discord_id}>.`);
-
-  if (ticket.discord_channel_id && target.discord_id) {
-    const channel = await client.channels.fetch(ticket.discord_channel_id);
-    if (isTextChannel(channel)) {
-      await channel.permissionOverwrites.edit(target.discord_id, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
-    }
-  }
-}
-
-async function showPriorityMenu(interaction: ButtonInteraction, ticketId: string) {
-  const profile = await assertStaff(interaction);
-  if (!profile) return;
-  const menu = new StringSelectMenuBuilder()
-    .setCustomId(`ticket_priority_submit:${ticketId}`)
-    .setPlaceholder('Escolha a prioridade')
-    .addOptions(
-      { label: 'Baixa', value: 'low', description: 'Pode aguardar', emoji: '○' },
-      { label: 'Normal', value: 'normal', description: 'Atendimento padrão', emoji: '•' },
-      { label: 'Alta', value: 'high', description: 'Atender com prioridade', emoji: '▲' },
-      { label: 'Urgente', value: 'urgent', description: 'Atenção imediata', emoji: '!' },
-    );
-  await interaction.reply({ content: 'Defina a prioridade deste atendimento:', components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu)], ephemeral: true });
-}
-
-async function updatePriority(interaction: StringSelectMenuInteraction, ticketId: string) {
-  const profile = await assertStaff(interaction);
-  const priority = interaction.values[0];
-  if (!profile || !['low', 'normal', 'high', 'urgent'].includes(priority)) {
-    await interaction.update({ content: 'Apenas a staff pode alterar a prioridade.', components: [] });
-    return;
-  }
-  await supabase.from('tickets').update({ priority }).eq('id', ticketId);
-  await addSystemMessage(ticketId, `${profile.full_name} definiu a prioridade como ${priorityLabel(priority)}.`);
-  await interaction.update({ content: `Prioridade atualizada para **${priorityLabel(priority)}**.`, components: [] });
-}
-
-async function closeTicket(interaction: ButtonInteraction, ticketId: string) {
-  const ticket = await getTicket(ticketId);
-  if (!ticket) {
-    await interaction.reply({ content: 'Atendimento não encontrado.', ephemeral: true });
-    return;
-  }
-  const profile = await assertStaff(interaction);
-  if (!profile) return;
-  const modal = new ModalBuilder().setCustomId(`ticket_close_submit:${ticketId}`).setTitle('Encerrar atendimento');
-  const resolved = new TextInputBuilder().setCustomId('resolved').setLabel('O caso foi resolvido? (sim ou nao)').setPlaceholder('sim ou nao').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(3);
-  const feedback = new TextInputBuilder().setCustomId('feedback').setLabel('Feedback do atendimento').setPlaceholder('Conte brevemente como foi a solução').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(1000);
-  modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(resolved), new ActionRowBuilder<TextInputBuilder>().addComponents(feedback));
-  await interaction.showModal(modal);
-}
-
-async function closeTicketSubmit(interaction: ModalSubmitInteraction, ticketId: string) {
-  const ticket = await getTicket(ticketId);
-  if (!ticket) {
-    await interaction.reply({ content: 'Atendimento não encontrado.', ephemeral: true });
-    return;
-  }
-  const profile = await getProfileByDiscordId(interaction.user.id);
-  if (!profile) {
-    await interaction.reply({ content: 'Apenas a staff pode encerrar atendimentos.', ephemeral: true });
-    return;
-  }
-  const resolvedInput = interaction.fields.getTextInputValue('resolved').trim().toLowerCase();
-  const feedback = interaction.fields.getTextInputValue('feedback').trim();
-  const resolved = ['sim', 's', 'yes'].includes(resolvedInput);
-  const { data: messages } = await supabase.from('messages').select('*').eq('ticket_id', ticketId).order('created_at', { ascending: true });
-  const transcript = (messages || []).map((message) => `[${new Date(message.created_at).toLocaleString('pt-BR')}] ${message.sender_name} (${message.sender_type}): ${message.content || `[Anexo: ${message.attachment_name || message.attachment_url}]`}`).join('\n');
-  const transcriptBuffer = Buffer.from(`Transcript do atendimento #${ticket.ticket_number}\nAssunto: ${ticket.subject}\nCliente: ${ticket.customer_name}\n\n${transcript}\n\nResultado: ${resolved ? 'Resolvido' : 'Não resolvido'}\nFeedback: ${feedback || 'Não informado'}\n`);
-
-  const closeEmbed = new EmbedBuilder()
-    .setColor(resolved ? 0x10b981 : 0xef4444)
-    .setTitle(`Atendimento #${ticket.ticket_number} encerrado`)
-    .setDescription(`Resultado: **${resolved ? 'Resolvido' : 'Não resolvido'}**${feedback ? `\nFeedback: ${feedback}` : ''}`)
-    .setFooter({ text: 'CUS • Central de Atendimento' })
-    .setTimestamp();
-
-  if (ticket.discord_channel_id) {
-    const channel = await client.channels.fetch(ticket.discord_channel_id);
-    if (isTextChannel(channel)) {
-      await channel.send({ embeds: [closeEmbed], files: [{ attachment: transcriptBuffer, name: `transcript-${ticket.ticket_number}.txt` }] });
-    }
-  }
-  if (config.channels.transcripts) {
-    const transcriptChannel = await client.channels.fetch(config.channels.transcripts);
-    if (isTextChannel(transcriptChannel) && transcriptChannel.guild.id === config.managementGuildId) {
-      await transcriptChannel.send({ content: `Transcript do atendimento #${ticket.ticket_number}`, files: [{ attachment: transcriptBuffer, name: `transcript-${ticket.ticket_number}.txt` }] });
-    }
+  let agentName: string | undefined;
+  if (newRecord.assigned_to) {
+    const agent = await getProfileById(String(newRecord.assigned_to));
+    agentName = agent?.full_name;
   }
 
-  await supabase.from('tickets').update({ status: 'closed', closed_at: new Date().toISOString(), close_reason: resolved ? 'Resolvido' : 'Não resolvido', close_notes: feedback, feedback_success: resolved, feedback_text: feedback || null }).eq('id', ticketId);
-  await supabase.from('ticket_events').insert({ ticket_id: ticketId, event_type: 'closed', actor_id: null, actor_name: interaction.user.globalName || interaction.user.username, details: { resolved, feedback, source: 'discord' } });
-  await addSystemMessage(ticketId, `Atendimento encerrado. Resultado: ${resolved ? 'resolvido' : 'não resolvido'}.${feedback ? ` Feedback: ${feedback}` : ''}`);
-  await interaction.reply({ content: `Atendimento encerrado como **${resolved ? 'resolvido' : 'não resolvido'}**. O transcript foi arquivado.`, ephemeral: true });
-}
+  const channel = await client.channels.fetch(ticket.discord_channel_id);
+  if (!isTextChannel(channel)) return;
 
-async function reopenTicket(interaction: ButtonInteraction, ticketId: string) {
-  const ticket = await getTicket(ticketId);
-  if (!ticket) {
-    await interaction.reply({ content: 'Atendimento não encontrado.', ephemeral: true });
-    return;
+  if (newStatus === 'closed') {
+    const resolved = String(newRecord.close_reason || '').toLowerCase().includes('resolvido') || Boolean(newRecord.feedback_success);
+    const feedback = String(newRecord.close_notes || '');
+    await channel.send({ embeds: [buildCloseEmbed(ticket, resolved, feedback)] });
+    const transcriptBuffer = Buffer.from(`Transcript do atendimento #${ticket.ticket_number}\nAssunto: ${ticket.subject}\nCliente: ${ticket.customer_name}\n\n[Transcript gerado automaticamente pelo encerramento na dashboard]\n`);
+    await channel.send({ files: [{ attachment: transcriptBuffer, name: `transcript-${ticket.ticket_number}.txt` }] }).catch(() => undefined);
+  } else {
+    await channel.send({ embeds: [buildStatusEmbed({ ...ticket, status: newStatus, priority: String(newRecord.priority || ticket.priority) }, agentName)] });
   }
-  const profile = await assertStaff(interaction);
-  if (!profile) return;
-  await supabase.from('tickets').update({ status: 'waiting', closed_at: null, close_reason: null }).eq('id', ticketId);
-  await addSystemMessage(ticketId, 'Atendimento reaberto e devolvido para a fila.');
-  await interaction.reply({ content: 'Atendimento reaberto e devolvido para a fila.', ephemeral: true });
-
-  const reopenEmbed = new EmbedBuilder()
-    .setColor(0xf59e0b)
-    .setTitle(`Atendimento #${ticket.ticket_number} reaberto`)
-    .setDescription('Este atendimento foi reaberto e está novamente na fila da equipe.')
-    .setFooter({ text: 'CUS • Central de Atendimento' })
-    .setTimestamp();
-
-  if (ticket.discord_channel_id) {
-    const channel = await client.channels.fetch(ticket.discord_channel_id);
-    if (isTextChannel(channel)) await channel.send({ embeds: [reopenEmbed] });
-  }
-}
-
-async function showManagePanel(interaction: ChatInputCommandInteraction) {
-  const profile = await getProfileByDiscordId(interaction.user.id);
-  if (!profile) {
-    await interaction.reply({ content: 'Apenas a staff pode usar este comando.', ephemeral: true });
-    return;
-  }
-  if (!interaction.channel || !isTextChannel(interaction.channel)) {
-    await interaction.reply({ content: 'Use este comando dentro do canal do atendimento.', ephemeral: true });
-    return;
-  }
-  const { data: ticket } = await supabase.from('tickets').select('id,ticket_number,subject,customer_name,customer_discord_id,discord_channel_id,assigned_to,status,priority').eq('discord_channel_id', interaction.channel.id).maybeSingle();
-  if (!ticket) {
-    await interaction.reply({ content: 'Este canal não é um canal de atendimento.', ephemeral: true });
-    return;
-  }
-  const embed = new EmbedBuilder()
-    .setColor(priorityColor(ticket.priority))
-    .setTitle(`Gestão do Atendimento #${ticket.ticket_number}`)
-    .setDescription(ticket.subject)
-    .addFields(
-      { name: 'Prioridade', value: priorityLabel(ticket.priority), inline: true },
-      { name: 'Status', value: ticket.status === 'transferred' ? 'Transferido' : ticket.status === 'in_progress' ? 'Em atendimento' : ticket.status === 'closed' ? 'Encerrado' : 'Aguardando', inline: true },
-      { name: 'Cliente', value: ticket.customer_discord_id ? `<@${ticket.customer_discord_id}>` : ticket.customer_name, inline: true },
-    )
-    .setFooter({ text: 'CUS • Painel de gestão da staff' })
-    .setTimestamp();
-  await interaction.reply({ embeds: [embed], components: ticketControls(ticket.id, ticket.status), ephemeral: true });
 }
 
 async function createBridgeServer() {
@@ -626,20 +463,11 @@ client.once('ready', async (readyClient) => {
 client.on('interactionCreate', async (interaction) => {
   try {
     if (interaction.isChatInputCommand() && interaction.commandName === 'ticket') return void await openTicket(interaction);
-    if (interaction.isChatInputCommand() && interaction.commandName === 'gerenciar') return void await showManagePanel(interaction);
     if (interaction.isButton() && interaction.customId.startsWith('ticket_category:')) return void await showTicketSubjectModal(interaction);
     if (interaction.isModalSubmit() && interaction.customId.startsWith('ticket_subject:')) {
       const category = categoryValue(interaction.customId.replace('ticket_subject:', ''));
       return void await createTicketForUser(interaction, interaction.fields.getTextInputValue('subject'), category);
     }
-    if (interaction.isButton() && interaction.customId.startsWith('ticket_claim:')) return void await claimTicket(interaction, interaction.customId.replace('ticket_claim:', ''));
-    if (interaction.isButton() && interaction.customId.startsWith('ticket_transfer:')) return void await showTransferModal(interaction, interaction.customId.replace('ticket_transfer:', ''));
-    if (interaction.isModalSubmit() && interaction.customId.startsWith('ticket_transfer_submit:')) return void await transferTicket(interaction, interaction.customId.replace('ticket_transfer_submit:', ''));
-    if (interaction.isButton() && interaction.customId.startsWith('ticket_priority:')) return void await showPriorityMenu(interaction, interaction.customId.replace('ticket_priority:', ''));
-    if (interaction.isStringSelectMenu() && interaction.customId.startsWith('ticket_priority_submit:')) return void await updatePriority(interaction, interaction.customId.replace('ticket_priority_submit:', ''));
-    if (interaction.isButton() && interaction.customId.startsWith('ticket_close:')) return void await closeTicket(interaction, interaction.customId.replace('ticket_close:', ''));
-    if (interaction.isModalSubmit() && interaction.customId.startsWith('ticket_close_submit:')) return void await closeTicketSubmit(interaction, interaction.customId.replace('ticket_close_submit:', ''));
-    if (interaction.isButton() && interaction.customId.startsWith('ticket_reopen:')) return void await reopenTicket(interaction, interaction.customId.replace('ticket_reopen:', ''));
   } catch (error) {
     console.error('Interaction error:', error);
     if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) await interaction.reply({ content: 'Ocorreu um erro ao processar esta ação. Tente novamente.', ephemeral: true });
@@ -649,8 +477,13 @@ client.on('interactionCreate', async (interaction) => {
 client.on('messageCreate', (message) => { void syncDiscordMessage(message); });
 
 supabase
-  .channel('dashboard-to-discord')
+  .channel('dashboard-to-discord-messages')
   .on('postgres_changes' as const, { event: 'INSERT', schema: 'public', table: 'messages' }, (payload: { new: Record<string, unknown> }) => { void syncDashboardMessage(payload); })
+  .subscribe();
+
+supabase
+  .channel('dashboard-to-discord-tickets')
+  .on('postgres_changes' as const, { event: 'UPDATE', schema: 'public', table: 'tickets' }, (payload: { new: Record<string, unknown>; old: Record<string, unknown> }) => { void syncTicketUpdate(payload); })
   .subscribe();
 
 void client.login(config.discordToken);
