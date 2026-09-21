@@ -39,6 +39,7 @@ export interface Ticket {
   customer_name: string;
   customer_discord_id: string | null;
   discord_channel_id: string | null;
+  discord_staff_channel_id: string | null;
   assigned_to: string | null;
   transferred_to: string | null;
   transfer_reason: string | null;

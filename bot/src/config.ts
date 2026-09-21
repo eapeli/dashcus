@@ -26,4 +26,6 @@ export const config = {
     alerts: process.env.DISCORD_CHANNEL_ALERTS_ID || '',
     logs: process.env.DISCORD_CHANNEL_LOGS_ID || '',
   },
+  staffCategoryId: process.env.DISCORD_STAFF_CATEGORY_ID || '',
+  staffRoleId: process.env.DISCORD_STAFF_ROLE_ID || '',
 };
