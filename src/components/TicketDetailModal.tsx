@@ -176,30 +176,6 @@ export default function TicketDetailModal({ ticket, onClose, onUpdate }: TicketD
     }
     setAction('close');
     setError(null);
-    const transcriptText = messages.map(m =>
-      `[${new Date(m.created_at).toLocaleString('pt-BR')}] ${m.sender_name} (${m.sender_type}): ${m.content || `[Anexo: ${m.attachment_name || m.attachment_url}]`}`
-    ).join('\n');
-
-    const transcriptFile = new Blob([
-      `Transcript do ticket #${ticket.ticket_number}\nAssunto: ${ticket.subject}\nCliente: ${ticket.customer_name}\n\n${transcriptText}\n\nFeedback: ${feedbackSuccess === 'resolved' ? 'Caso resolvido com sucesso' : 'Caso não resolvido'}\nObservação: ${feedbackText.trim() || 'Não informado'}\n`,
-    ], { type: 'text/plain;charset=utf-8' });
-    let transcriptUrl: string;
-    try {
-      const discordTranscript = await uploadToDiscord({
-        ticket,
-        file: transcriptFile,
-        attachmentType: 'transcript',
-        senderId: profile.id,
-        senderName: profile.full_name,
-      });
-      transcriptUrl = discordTranscript.url;
-    } catch (uploadError) {
-      console.error('Discord transcript upload error:', uploadError);
-      setError('Não foi possível salvar o transcript. O ticket não foi fechado.');
-      setAction('none');
-      return;
-    }
-
     const { error } = await supabase.from('tickets').update({
       status: 'closed',
       closed_at: new Date().toISOString(),
@@ -207,7 +183,6 @@ export default function TicketDetailModal({ ticket, onClose, onUpdate }: TicketD
       close_notes: closeNotes,
       feedback_success: feedbackSuccess === 'resolved',
       feedback_text: feedbackText.trim() || null,
-      transcript_url: transcriptUrl,
     }).eq('id', ticket.id);
 
     if (error) {
@@ -218,21 +193,14 @@ export default function TicketDetailModal({ ticket, onClose, onUpdate }: TicketD
         event_type: 'closed',
         actor_id: profile.id,
         actor_name: profile.full_name,
-        details: { reason: closeReason, notes: closeNotes, transcript_url: transcriptUrl, storage: 'discord' },
+        details: { reason: closeReason, notes: closeNotes, storage: 'discord' },
       });
       await supabase.from('messages').insert({
         ticket_id: ticket.id,
         sender_type: 'system',
         sender_name: 'Sistema',
-        content: `Ticket fechado por ${profile.full_name}. Feedback: ${feedbackSuccess === 'resolved' ? 'Caso resolvido com sucesso' : 'Caso não resolvido'}.${feedbackText.trim() ? ` Observação: ${feedbackText.trim()}` : ''} Transcript salvo para conferência da liderança.`,
+        content: `Ticket fechado por ${profile.full_name}. Feedback: ${feedbackSuccess === 'resolved' ? 'Caso resolvido com sucesso' : 'Caso não resolvido'}.${feedbackText.trim() ? ` Observação: ${feedbackText.trim()}` : ''} O transcript será gerado automaticamente no canal de transcripts do Discord.`,
         attachment_type: 'none',
-      });
-      await supabase.from('team_messages').insert({
-        sender_id: profile.id,
-        sender_name: 'Sistema',
-        sender_role: profile.role,
-        content: `Transcript do ticket #${ticket.ticket_number} salvo para conferência da liderança: ${transcriptUrl}`,
-        message_type: 'message',
       });
       setAction('none');
       setCloseReason('');
@@ -268,10 +236,8 @@ export default function TicketDetailModal({ ticket, onClose, onUpdate }: TicketD
           sender_type: 'agent',
           sender_id: profile.id,
           sender_name: profile.full_name,
-          content: null,
-          attachment_type: type,
-          attachment_url: discordAttachment.url,
-          attachment_name: discordAttachment.name || file.name,
+          content: `[Anexo enviado ao Discord: ${discordAttachment.name || file.name}]`,
+          attachment_type: 'none',
         });
       } catch (uploadError) {
         console.error('Discord attachment upload error:', uploadError);
@@ -577,7 +543,7 @@ export default function TicketDetailModal({ ticket, onClose, onUpdate }: TicketD
                           className="w-full px-3 py-2 bg-white border border-emerald-200 rounded-lg text-sm text-gray-700 focus:outline-none focus:border-emerald-400 resize-none"
                         />
                         <p className="text-xs text-emerald-600">
-                          Um transcript será gerado e salvo para conferência da liderança.
+                          O transcript completo será gerado automaticamente e enviado ao canal de transcripts do Discord.
                         </p>
                         <button
                           onClick={handleClose}
@@ -593,17 +559,10 @@ export default function TicketDetailModal({ ticket, onClose, onUpdate }: TicketD
               </div>
             )}
 
-            {ticket.status === 'closed' && ticket.transcript_url && (
+            {ticket.status === 'closed' && (
               <div className="p-3 bg-gray-50 rounded-xl">
                 <p className="text-xs font-medium text-gray-500 mb-2">Transcript</p>
-                <a
-                  href={ticket.transcript_url}
-                  download={`transcript-${ticket.ticket_number}.txt`}
-                  className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 font-medium"
-                >
-                  <FileText className="w-4 h-4" />
-                  Baixar transcript
-                </a>
+                <p className="text-sm text-gray-600">O transcript completo foi arquivado no canal de transcripts do Discord.</p>
               </div>
             )}
           </div>

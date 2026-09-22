@@ -349,20 +349,6 @@ async function syncDiscordMessage(message: Message) {
   const senderName = agent?.full_name || message.author.globalName || message.author.username;
   const senderId = agent?.id || null;
 
-  for (const attachment of message.attachments.values()) {
-    const type = attachment.contentType?.startsWith('image/') ? 'image' : attachment.contentType?.startsWith('audio/') ? 'audio' : attachment.contentType?.startsWith('video/') ? 'video' : 'file';
-    await supabase.from('messages').insert({
-      ticket_id: ticket.id,
-      sender_type: senderType,
-      sender_id: senderId,
-      sender_name: senderName,
-      content: message.content || null,
-      attachment_type: type,
-      attachment_url: attachment.url,
-      attachment_name: attachment.name,
-    });
-  }
-
   if (message.content) {
     await supabase.from('messages').insert({
       ticket_id: ticket.id,
@@ -385,6 +371,72 @@ async function syncDashboardMessage(payload: { new: Record<string, unknown> }) {
   if (isTextChannel(channel)) {
     await channel.send({ content: `**${message.sender_name}**\n${message.content}` });
   }
+}
+
+async function sendTranscriptToChannel(ticket: TicketRow) {
+  if (!ticket.discord_channel_id) return;
+  const channel = await client.channels.fetch(ticket.discord_channel_id);
+  if (!isTextChannel(channel)) return;
+
+  const allMessages: Message[] = [];
+  let lastId: string | undefined;
+  for (let i = 0; i < 50; i++) {
+    const batch = await channel.messages.fetch({ limit: 100, ...(lastId ? { before: lastId } : {}) });
+    if (batch.size === 0) break;
+    allMessages.push(...batch.values());
+    lastId = batch.last()?.id;
+    if (batch.size < 100) break;
+  }
+  allMessages.reverse();
+
+  const lines = allMessages
+    .filter((m) => !m.author.bot || m.embeds.length === 0)
+    .map((m) => {
+      const time = new Date(m.createdTimestamp).toLocaleString('pt-BR');
+      const author = m.author.bot ? 'Sistema' : (m.author.globalName || m.author.username);
+      const attachments = m.attachments.size > 0
+        ? m.attachments.map((a) => `[Anexo: ${a.name}]`).join(' ')
+        : '';
+      return `[${time}] ${author}: ${m.content || ''}${attachments ? ` ${attachments}` : ''}`;
+    })
+    .join('\n');
+
+  const transcriptBuffer = Buffer.from(
+    `Transcript do Atendimento #${ticket.ticket_number}\n` +
+    `Assunto: ${ticket.subject}\n` +
+    `Cliente: ${ticket.customer_name}\n` +
+    `Canal: #${channel.name}\n` +
+    `${'─'.repeat(50)}\n\n` +
+    `${lines}\n\n` +
+    `${'─'.repeat(50)}\n` +
+    `Fim do transcript`,
+  );
+
+  if (config.channels.transcripts) {
+    const transcriptChannel = await client.channels.fetch(config.channels.transcripts);
+    if (isTextChannel(transcriptChannel) && transcriptChannel.guild.id === config.managementGuildId) {
+      const transcriptEmbed = new EmbedBuilder()
+        .setColor(BRAND_COLOR)
+        .setAuthor({ name: `${BRAND_NAME} • Central de Atendimento`, iconURL: client.user?.displayAvatarURL() || undefined })
+        .setTitle(`📋 Transcript #${ticket.ticket_number}`)
+        .addFields(
+          { name: 'Assunto', value: ticket.subject, inline: false },
+          { name: 'Cliente', value: ticket.customer_discord_id ? `<@${ticket.customer_discord_id}>` : ticket.customer_name, inline: true },
+          { name: 'Mensagens', value: String(allMessages.length), inline: true },
+        )
+        .setFooter({ text: `${BRAND_NAME} • ${BRAND_TAGLINE}`, iconURL: client.user?.displayAvatarURL() || undefined })
+        .setTimestamp();
+      await transcriptChannel.send({
+        embeds: [transcriptEmbed],
+        files: [{ attachment: transcriptBuffer, name: `transcript-${ticket.ticket_number}.txt` }],
+      });
+    }
+  }
+
+  await channel.send({
+    content: '📋 **Transcript gerado e arquivado no canal de transcripts.**',
+    files: [{ attachment: transcriptBuffer, name: `transcript-${ticket.ticket_number}.txt` }],
+  }).catch(() => undefined);
 }
 
 async function syncTicketUpdate(payload: { new: Record<string, unknown>; old: Record<string, unknown> }) {
@@ -411,8 +463,7 @@ async function syncTicketUpdate(payload: { new: Record<string, unknown>; old: Re
     const resolved = String(newRecord.close_reason || '').toLowerCase().includes('resolvido') || Boolean(newRecord.feedback_success);
     const feedback = String(newRecord.close_notes || '');
     await channel.send({ embeds: [buildCloseEmbed(ticket, resolved, feedback)] });
-    const transcriptBuffer = Buffer.from(`Transcript do atendimento #${ticket.ticket_number}\nAssunto: ${ticket.subject}\nCliente: ${ticket.customer_name}\n\n[Transcript gerado automaticamente pelo encerramento na dashboard]\n`);
-    await channel.send({ files: [{ attachment: transcriptBuffer, name: `transcript-${ticket.ticket_number}.txt` }] }).catch(() => undefined);
+    await sendTranscriptToChannel(ticket);
   } else {
     await channel.send({ embeds: [buildStatusEmbed({ ...ticket, status: newStatus, priority: String(newRecord.priority || ticket.priority) }, agentName)] });
   }
